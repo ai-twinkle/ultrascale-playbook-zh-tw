@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>參考資源　參考資源 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="appd.html">← 附錄 A3</a><span class="chapnav-current">參考資源　參考資源</span></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="appd.html"><span class="dir">← 上一章</span><div class="ttl">附錄 A3　計算／通訊重疊的數學</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 參考資源（References）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+## 里程碑 LLM 擴展論文（Landmark LLM Scaling Papers）
+
+[**Megatron-LM**](https://arxiv.org/abs/1909.08053)
+
+提出張量平行（tensor parallelism）以及用於訓練大型語言模型的高效模型平行技術。
+
+[**Megatron-Turing NLG 530B**](https://developer.nvidia.com/blog/using-deepspeed-and-megatron-to-train-megatron-turing-nlg-530b-the-worlds-largest-and-most-powerful-generative-language-model/)
+
+描述如何結合 DeepSpeed 與 Megatron-LM 框架訓練出 5,300 億參數的模型。
+
+[**PaLM**](https://arxiv.org/abs/2204.02311)
+
+介紹 Google 的 Pathways Language Model，在數百項語言任務與推理能力上展現強勁表現。
+
+[**Gemini**](https://arxiv.org/abs/2312.11805)
+
+介紹 Google 的多模態模型架構，能夠處理文字、圖像、音訊與影片輸入。
+
+[**Llama 3**](https://arxiv.org/abs/2407.21783)
+
+The Llama 3 Herd of Models（Llama 3 系列模型）。
+
+[**DeepSeek-V3**](https://arxiv.org/abs/2412.19437v1)
+
+DeepSeek 針對 DeepSeek-V3 模型架構與訓練過程的技術報告。
+
+## 訓練框架（Training Frameworks）
+
+[**Nanotron**](https://github.com/huggingface/nanotron)
+
+我們用於訓練大型語言模型的框架，具備多種平行化策略。
+
+[**Megatron-LM**](https://github.com/NVIDIA/Megatron-LM)
+
+NVIDIA 用於訓練大型語言模型的框架，具備多種平行化策略。
+
+[**DeepSpeed**](https://www.deepspeed.ai/)
+
+Microsoft 的深度學習最佳化函式庫，具備 ZeRO 各階段最佳化與多種平行化策略。
+
+[**FairScale**](https://github.com/facebookresearch/fairscale/tree/main)
+
+用於大規模訓練的 PyTorch 擴充函式庫，提供多種平行化與最佳化技術。
+
+[**ColossalAI**](https://colossalai.org/)
+
+整合式大規模模型訓練系統，內含多種最佳化技術。
+
+[**torchtitan**](https://github.com/pytorch/torchtitan)
+
+PyTorch 原生的大型模型訓練函式庫。
+
+[**GPT-NeoX**](https://github.com/EleutherAI/gpt-neox)
+
+EleutherAI 用於訓練大型語言模型的框架，曾用來訓練 GPT-NeoX-20B。
+
+[**LitGPT**](https://github.com/Lightning-AI/litgpt)
+
+Lightning AI 對最先進開源 LLM 的實作，著重可重現性。
+
+[**DiLoco**](https://github.com/PrimeIntellect-ai/OpenDiLoCo)
+
+使用 DiLoCo 跨運算叢集訓練語言模型。
+
+[**torchgpipe**](https://github.com/kakaobrain/torchgpipe)
+
+GPipe 的 PyTorch 實作。
+
+[**OSLO**](https://github.com/EleutherAI/oslo)
+
+OSLO：Open Source for Large-scale Optimization（大規模最佳化開源專案）。
+
+## 除錯（Debugging）
+
+[**Speed profiling**](https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)
+
+PyTorch 官方教學，說明如何使用 profiler 分析模型效能與瓶頸。
+
+[**Memory profiling**](https://pytorch.org/blog/understanding-gpu-memory-1/)
+
+理解與最佳化 PyTorch GPU 記憶體使用的完整指南。
+
+[**Memory profiling walkthrough on a simple example**](https://huggingface.co/blog/train_memory)
+
+以簡單範例視覺化並理解 PyTorch 的 GPU 記憶體。
+
+[**TensorBoard Profiler Tutorial**](https://pytorch.org/tutorials/intermediate/tensorboard_profiler_tutorial.html)
+
+使用 TensorBoard 效能分析工具剖析 PyTorch 模型的指南。
+
+## 分散式技術（Distribution Techniques）
+
+[**Data parallelism**](https://siboehm.com/articles/22/data-parallel-training)
+
+對深度學習中資料平行訓練的完整解說。
+
+[**ZeRO**](https://arxiv.org/abs/1910.02054)
+
+提出 Zero Redundancy Optimizer（零冗餘最佳化器），以記憶體最佳化來訓練大型模型。
+
+[**FSDP**](https://arxiv.org/abs/2304.11277)
+
+PyTorch 的 Fully Sharded Data Parallel（完全分片資料平行）訓練實作。
+
+[**Tensor and Sequence Parallelism + Selective Recomputation**](https://arxiv.org/abs/2205.05198)
+
+結合多種平行化策略以高效訓練大規模模型的進階技術。
+
+[**Pipeline parallelism**](https://developer.nvidia.com/blog/scaling-language-model-training-to-a-trillion-parameters-using-megatron/#pipeline_parallelism)
+
+NVIDIA 針對大型模型訓練實作管線平行（pipeline parallelism）的指南。
+
+[**Breadth first Pipeline Parallelism**](https://arxiv.org/abs/2211.05953)
+
+包含對各種 PP 排程（schedule）的廣泛討論。
+
+[**All-reduce**](https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/)
+
+詳細解說分散式訓練中使用的 ring all-reduce 演算法。
+
+[**Ring-flash-attention**](https://github.com/zhuzilin/ring-flash-attention)
+
+結合 ring attention 機制與 Flash Attention 的實作，用於高效訓練。
+
+[**Ring attention tutorial**](https://coconut-mode.com/posts/ring-attention/)
+
+解說 ring attention 概念與實作的教學。
+
+[**ZeRO and 3D**](https://www.deepspeed.ai/tutorials/large-models-w-deepspeed/#understanding-performance-tradeoff-between-zero-and-3d-parallelism)
+
+DeepSpeed 對於理解 ZeRO 與 3D 平行策略之間取捨的指南。
+
+[**Mixed precision training**](https://arxiv.org/abs/1710.03740)
+
+提出用於深度學習模型的混合精度訓練技術。
+
+[**Visualizing 6D Mesh Parallelism**](https://main-horse.github.io/posts/visualizing-6d/)
+
+解說 6D 平行網格（parallel mesh）中所涉及的集體通訊。
+
+## 硬體（Hardware）
+
+[**Fire-Flyer - a 10,000 PCI chips cluster**](https://www.arxiv.org/abs/2408.14158)
+
+DeepSeek 關於設計一座具備 1 萬張 PCI GPU 叢集的報告。
+
+[**Meta's 24k H100 Pods**](https://engineering.fb.com/2024/03/12/data-center-engineering/building-metas-genai-infrastructure/)
+
+Meta 詳細介紹其以 NVIDIA H100 GPU 打造的大規模 AI 基礎設施。
+
+[**Semianalysis - 100k H100 cluster**](https://www.semianalysis.com/p/100000-h100-clusters-power-network)
+
+分析大規模 H100 GPU 叢集及其對 AI 基礎設施的影響。
+
+[**Modal GPU Glossary**](https://modal.com/gpu-glossary/readme)
+
+寫給人看的 CUDA 文件。
+
+## 其他（Others）
+
+[**Stas Bekman's Handbook**](https://github.com/stas00/ml-engineering)
+
+涵蓋 LLM 訓練各面向的完整手冊。
+
+[**Bloom training chronicles**](https://github.com/bigscience-workshop/bigscience/blob/master/train/tr11-176B-ml/chronicles.md)
+
+詳細記錄 BLOOM 模型訓練過程與遭遇的各種挑戰。
+
+[**OPT logbook**](https://github.com/facebookresearch/metaseq/blob/main/projects/OPT/chronicles/OPT175B_Logbook.pdf)
+
+Meta 詳細記錄 OPT-175B 模型訓練過程的日誌。
+
+[**Harm's law for training smol models longer**](https://www.harmdevries.com/post/model-size-vs-compute-overhead/)
+
+探討模型規模與訓練額外開銷之間的關係。
+
+[**Harm's blog for long context**](https://www.harmdevries.com/post/context-length/)
+
+從資料與訓練成本的角度探討長上下文（long context）訓練。
+
+[**GPU Mode**](https://www.youtube.com/@GPUMODE/videos)
+
+一個 GPU 讀書會與社群。
+
+[**EleutherAI Youtube channel**](https://youtube.com/playlist?list=PLvtrkEledFjqOLuDB_9FWL3dgivYqc6-3&si=fKWPotx8BflLAUkf)
+
+ML Scalability & Performance 讀書會（機器學習可擴展性與效能讀書會）。
+
+[**Google Jax Scaling book**](https://jax-ml.github.io/scaling-book/)
+
+How to Scale Your Model（如何擴展你的模型）。
+
+[**@fvsmassa & @TimDarcet FSDP**](https://github.com/facebookresearch/capi/blob/main/fsdp.py)
+
+僅約 500 行程式碼的獨立 FSDP 實作。
+
+[**thonking.ai**](https://www.thonking.ai/)
+
+Horace He 的部落格文章選輯——Making GPUs go BRRR（讓 GPU 火力全開）。
+
+[**Aleksa's ELI5 Flash Attention**](https://gordicaleksa.medium.com/eli5-flash-attention-5c44017022ad)
+
+對 Flash Attention 淺顯易懂的解說。
+
+[**TunibAI's 3D parallelism tutorial**](https://github.com/tunib-ai/large-scale-lm-tutorials)
+
+以 PyTorch 進行大規模語言建模的教學。
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

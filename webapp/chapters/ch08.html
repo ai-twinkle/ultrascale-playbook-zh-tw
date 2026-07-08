@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 8 章　尋找最佳訓練配置 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="ch07.html">← 第 7 章</a><span class="chapnav-current">第 8 章　尋找最佳訓練配置</span><a href="ch09.html">第 9 章 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="ch07.html"><span class="dir">← 上一章</span><div class="ttl">第 7 章　5D 平行速覽</div></a><a class="next" href="ch09.html"><span class="dir">下一章 →</span><div class="ttl">第 9 章　深入 GPU：架構與核心</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 第 8 章　尋找最佳訓練配置（Finding the Best Training Configuration）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+到目前為止，我們已經介紹了實務上真正用來分散並訓練更大模型的所有平行化技術，也說明了它們如何組合、為何能夠組合。但仍有一個大哉問：最終我們該選擇哪些技術，又該如何決定具體的組合方式？
+
+前一節我們稍微觸及了這個問題，現在就讓我們一步步詳細走過一個可行的決策流程。請記住，你永遠都需要實際跑幾個實驗，才能針對你的運算叢集——考量其各種物理特性、網路頻寬、每節點 GPU 數、每張 GPU 的記憶體等——找到最終的最佳設定。
+
+## 步驟一：讓一個訓練步驟放進記憶體（Fitting a Training Step in Memory）
+
+首先，我們需要弄清楚如何將一個完整的模型實例放進我們的 GPU。這裡有兩種常見情境。
+
+**GPU 充裕的情況 🤑**——當你手上有大量 GPU 可用時：
+
+* 對於 10B 參數以下的模型，你可以只用單一平行化技術，例如在 8 張 GPU 上使用張量平行（TP），或搭配完整重算（Full Recompute）的 ZeRO-3/DP
+* 對於 10B 到 100B 參數之間、需要超過 8 張 GPU 的模型，你有幾種選擇：
+  * 結合張量平行（TP=8）與管線平行（PP）
+  * 結合張量平行（TP=8）與資料平行（ZeRO-3）
+  * 只使用 ZeRO-3（也就是純資料平行）
+* 到了 512+ GPU 的規模，純資料平行／ZeRO-3 會因為通訊成本而開始變得沒有效率——此時把 DP 與張量平行或管線平行結合起來，會是更好的做法
+* 到了 1024+ GPU 的規模，建議的設定是張量平行 TP=8 搭配資料平行（ZeRO-2）與管線平行
+
+> 📝 **註**：目前我們先專注在放得下單一模型實例——雖然我們可能會借助 DP（透過 ZeRO）來達成這個目標，但這裡我們只在意 ZeRO-3 在模型參數上帶來的記憶體節省。
+
+特殊考量：
+
+* 對於非常長的序列，你可能會想跨節點加上上下文平行（CP）。
+* 對於混合專家（Mixture of Experts）架構，跨節點使用專家平行（EP）會很有優勢。
+
+**GPU 匱乏的情況 😭**——當你的 GPU 資源可能捉襟見肘時：
+
+* 你可以啟用完整的激活值重算（full activation recomputation），用一些計算量換取記憶體（訓練會稍微變慢）。
+* 你可以增加梯度累積（gradient accumulation）步數，在有限的記憶體下處理更大的批次。
+
+現在我們已經有第一個能訓練起來的模型實例了，接下來要確保批次大小設定正確。
+
+## 步驟二：達到目標全域批次大小（Achieving Target Global Batch Size）
+
+取決於步驟一結束時我們的微批次大小（micro batch size）與 DP 程度落在哪裡，目前的批次大小可能太小或太大。現在該把它調整到我們的目標批次大小了。
+
+要增加目前的全域批次大小（global batch size）：
+
+* 我們可以擴大資料平行的規模，或增加梯度累積步數
+* 對於長序列，我們可以利用上下文平行
+
+要減少目前的全域批次大小：
+
+* 我們可以縮減資料平行，改採其他平行化策略
+* 對於長序列，我們可以降低上下文平行的程度
+
+好了，現在模型已經以我們想要的模型大小與批次大小這個大方向的配置跑起來了，但我們是用最快的方式在訓練它嗎？接下來就開始盡可能地將吞吐量（throughput）最佳化吧。
+
+## 步驟三：最佳化訓練吞吐量（Optimizing Training Throughput）
+
+我們希望訓練跑得越快越好，讓所有寶貴的 GPU 隨時都被充分利用。只要記憶體和通訊還不是瓶頸，我們可以嘗試以下做法：
+
+* 擴大張量平行（利用節點內的高速頻寬），直到平行度接近節點大小，以便減少其他平行化的需求
+* 在維持目標批次大小的前提下，增加使用 ZeRO-3 的資料平行
+* 當資料平行的通訊開始成為瓶頸時，轉而使用管線平行
+* 逐一嘗試擴大各種平行化
+* 嘗試多種微批次大小（$mbs$），在最大全域批次大小（GBS）、模型大小、計算與通訊之間找到最佳平衡
+
+## 對數千種配置進行基準測試（Benchmarking thousands of configurations）
+
+既然一步步的流程都講完了，就讓我們在真實世界中實作這個搜尋過程。
+
+在 [nanotron](https://github.com/huggingface/nanotron) 儲存庫中，你可以找到數個腳本，用來執行我們前面討論過的所有實驗，並在真實環境中對你自己的模型與叢集進行基準測試。
+
+我們自己實際對**數千種分散式配置**跑了基準測試，涵蓋前面討論過的每一種模型大小，以及大量我們能嘗試的叢集配置（即 1 到 64 個節點、每節點 8 張 H100），以產出本書至此呈現的所有結果。
+
+> 📝 **註**：我們想藉此機會向同事們致歉，因為我們幾乎佔滿了整個科學叢集；也順道原諒那些可能曾被低聲說出的威脅。
+
+現在讓我們退一步，彙整並分析所有基準測試的結果，看看在理論之外，我們能否從真實世界的資料中實際發現各種配置彼此的優劣。
+
+以下所有基準測試都以 4096 的序列長度、1M token 的全域批次大小進行。我們蒐集了每種模型與叢集大小之下的所有最佳配置，並繪製成以下的熱力圖：
+
+![what_we_learnt_heatmap](../webapp/assets/images/what_we_learnt_heatmap.svg)
+
+*熱力圖視覺化呈現不同模型大小與運算節點數（每個節點有 8 張 GPU）之下的最佳訓練配置。每種組合的配置細節包括資料平行（DP）、張量平行（TP）、管線平行（PP）、梯度累積步數（GAS）、微批次大小（MBS）以及 ZeRO 最佳化階段。顏色深淺代表模型 FLOPs 利用率（Model FLOPs Utilization，MFU），越亮代表效率越高。*
+
+從這張高層次的視覺化圖表中，我們可以歸納出幾個重要的洞察：
+
+首先，隨著節點數增加（更高的平行度），我們觀察到效率下降。這個效應在較小的模型上特別明顯，因為它們的計算量對模型大小的比值較低。雖然我們通常可以透過增加批次大小來彌補模型太小的問題，但我們受限於 1M 的全域批次大小上限。
+
+其次，較大的模型帶來的是另一種挑戰。隨著模型大小增加，記憶體需求大幅成長。在節點較少時，這會造成兩種情況：模型完全放不下，或者勉強放得下、卻因為運作在接近 GPU 記憶體上限的狀態而效率低落（例如在 4 個節點上訓練 80B 參數模型的情況）。
+
+最後，我們的基準測試顯示，效能高度取決於實作品質。當我們最初實作這兩種平行化策略時，張量平行（TP）的表現優於管線平行（PP）。在我們最佳化 PP 程式碼之後，它反而成為較快的選項。而現在我們正在改進 TP 實作中的通訊重疊，預期它將重新奪回效能領先的地位。
+
+## 基準測試的經驗教訓（Lessons learned on benchmarking）
+
+本書的目標不只是討論理論與實作，也要提供實際的資料點。所以計畫很簡單：對每一種模型與多種叢集大小（即 1 到 64 個節點、每節點 8 張 H100）跑遍所有可能的分散式配置。即便排除掉不可能的配置之後，我們仍需執行數千個實驗。
+
+紙上談兵聽起來很容易：我們可以輕鬆地在叢集上發起大批的工作陣列。然而，當我們送出第一批實驗後，麻煩就開始了：
+
+* PyTorch 行程有時無法正確清理
+* Slurm 工作管理器會強制終止工作，導致節點故障
+* 原本應該幾分鐘就能完成的簡單基準測試，會拖成好幾個小時
+* 有些工作會無限期卡住
+
+要在有限的時間內跑完所有實驗，需要額外的工程投入，我們最後花了大量時間在以下事項上：
+
+* 將叢集重啟時間降到最低，並將閒置時間最佳化
+* 分析詳細的 NCCL 除錯日誌
+* 理解記憶體使用模式與 CUDA 記憶體配置器（memory allocator）的行為
+* 改善多節點環境下的管線平行效能
+
+這些挑戰值得專文另述，但它們讓我們學到了關於分散式訓練基礎設施複雜性的寶貴一課。理論上看似簡單的事情，實務上往往需要對許多環節投以細心關注。
+
+在實務中重現理論結果相當有挑戰性，尤其是可取得的生產級訓練程式碼相當有限。透過 [nanotron](https://github.com/huggingface/nanotron) 與 [picotron](https://github.com/huggingface/picotron) 這樣的開源專案，我們希望能讓分散式訓練技術變得更容易上手，也希望能在簡潔、高效的程式碼基礎上共同協作，幫助研究人員與實務工作者將硬體資源發揮到極致。
+
+---
+
+我們對 5D 平行化各種分散式方法的深度探索，到此告一段落。
+
+退一步來看，我們到目前為止的討論往往仰賴一個關鍵假設——計算與通訊可以在 GPU 上有效率地重疊，而不影響計算吞吐量。現實則更為微妙。當使用 NCCL send/recv 這類常見的通訊原語（primitive）時，計算資源與通訊資源之間存在隱性的競爭，因為通訊 kernel 通常會佔用與計算相同的 GPU 串流多處理器（streaming multiprocessor，SM），導致通訊與計算重疊時吞吐量下降。要真正將我們的分散式訓練最佳化，就需要更深入探究 GPU 架構本身。
+
+> 📝 **註**：此外，重疊計算與通訊時的同步模式，對我們的平行策略而言不一定是最佳的。你可以在 PyTorch 團隊的[這篇部落格文章](https://discuss.pytorch.org/t/distributed-w-torchtitan-introducing-async-tensor-parallelism-in-pytorch/209487)中找到一個例子。
+
+是時候關上燈，啟動 CUDA 模式了！
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/ch08.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

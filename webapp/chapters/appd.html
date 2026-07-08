@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>附錄 A3　計算／通訊重疊的數學 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="appc.html">← 附錄 A2</a><span class="chapnav-current">附錄 A3　計算／通訊重疊的數學</span><a href="references.html">參考資源 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="appc.html"><span class="dir">← 上一章</span><div class="ttl">附錄 A2　LLM 訓練的典型尺度</div></a><a class="next" href="references.html"><span class="dir">下一章 →</span><div class="ttl">參考資源　參考資源</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 附錄 A3　計算／通訊重疊的數學（Math for Compute/Communication Overlap）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+利用前一節的公式，我們可以估算分散式訓練中計算與通訊在什麼情況下能有效重疊。讓我們以資料平行（ZeRO-0）為例。
+
+## 資料平行的通訊分析（Data Parallelism Communication Analysis）
+
+需要通訊的梯度總大小為：
+
+- 梯度 = 參數 ≈ $num\_layers \cdot 16h^2$
+
+在反向傳播期間，這些梯度會以桶（bucket，預設大小 25 MB）為單位進行通訊。對每個桶執行 all-reduce 的通訊時間為：
+
+$$
+t_{comm} = t_{comm\_bucket} = \frac{bucket\_size \cdot 2(DP-1)}{DP \cdot peak\_bw}
+$$
+
+> 📝 **註**：在頻寬計算方面，我們採用 [NCCL 文件](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md#summary)中的匯流排頻寬（bus bandwidth）公式。這些公式在計算 GPU 之間的有效頻寬時，把特定的通訊模式納入了考量。
+
+反向傳播的計算時間為：
+
+$$
+t_{compute} = \frac{4 \cdot num\_tokens \cdot num\_params}{peak\_flops}
+$$
+
+要達到有效重疊，我們需要：
+
+$$
+\frac{t_{comm}}{t_{compute}} = \frac{num\_params}{2 \cdot num\_tokens} \cdot \frac{DP-1}{DP} \cdot \frac{peak\_flops}{peak\_bw} \leq 1
+$$
+
+這個比值有助於判斷通訊是否會成為訓練的瓶頸。當比值小於 1 時，通訊就能完全與計算重疊。
+
+## ZeRO-3（FSDP）的通訊分析（ZeRO-3 (FSDP) Communication Analysis）
+
+在 ZeRO-3 中，參數與梯度會分片（shard）到各個 GPU 上。針對一個每個 transformer 區塊有 $16h^2$ 個參數的模型，讓我們分析其通訊模式：
+
+- 前向傳播中的每個 transformer 區塊：
+  - All-gather 參數：每個 rank $16h^2/DP$ 位元組
+- 反向傳播中的每個 transformer 區塊：
+  - All-gather 參數：每個 rank $16h^2/DP$ 位元組
+  - Reduce-scatter 梯度：每個 rank $16h^2/DP$ 位元組
+- 每個區塊的總通訊量：$3 \cdot 16h^2/DP$ 位元組
+- 完整模型的總通訊量：$3 \cdot num\_layers \cdot 16h^2/DP$ 位元組
+
+All-gather 操作的通訊時間為：
+
+$$
+t_{comm} = 16h^2 \cdot \frac{DP-1}{DP \cdot peak\_bw}
+$$
+
+單一 decoder 層前向傳播的計算時間為：
+
+$$
+t_{compute} = \frac{2 \cdot seq\_len \cdot mbs \cdot (16 \cdot h^2)}{peak\_flops} = \frac{32 \cdot seq\_len \cdot mbs \cdot h^2}{peak\_flops}
+$$
+
+要讓計算與通訊有效重疊，我們需要：
+
+$$
+\frac{t_{comm}}{t_{compute}} = \frac{1}{2 \cdot seq\_len \cdot mbs} \cdot \frac{DP-1}{DP} \cdot \frac{peak\_flops}{peak\_bw} \leq 1
+$$
+
+當這個比值小於 1 時，下一層參數的通訊就能隱藏在當前這一層的計算背後。
+
+## TP 的通訊分析（TP Communication Analysis）
+
+在張量平行（Tensor Parallelism, TP）中，激活值會在線性層運算期間分片到各個 GPU 上。讓我們分析其通訊模式：
+
+- 前向傳播中的每個 column-linear 運算：
+  - All-gather 激活值：每個 rank $seq \cdot mbs \cdot h/TP$ 位元組
+- 反向傳播中的每個 column-linear 運算：
+  - Reduce-scatter 梯度：每個 rank $seq \cdot mbs \cdot h/TP$ 位元組
+- Row-linear 運算則反過來。每個 transformer 區塊有 2 個 column-linear 與 2 個 row-linear 運算。
+- 每個區塊的總通訊量：$8 \cdot seq \cdot mbs \cdot h/TP$ 位元組
+- 完整模型的總通訊量：$8 \cdot num\_layers \cdot seq \cdot mbs \cdot h/TP$ 位元組
+
+讓我們分析能否把某一層的 all-gather 通訊與下一個線性層的計算重疊。All-gather 操作的通訊時間為：
+
+$$
+t_{comm} = \frac{seq \cdot mbs \cdot h \cdot (TP-1)}{TP \cdot peak\_bw}
+$$
+
+而下一個線性層（參數量為 $h^2$）的計算時間為：
+
+$$
+t_{compute} = \frac{2 \cdot seq \cdot mbs \cdot h^2}{TP \cdot peak\_flops}
+$$
+
+要達到有效重疊，我們希望通訊時間小於計算時間：
+
+$$
+\frac{t_{comm}}{t_{compute}} = \frac{TP-1}{2 \cdot h} \cdot \frac{peak\_flops}{peak\_bw} \leq 1
+$$
+
+這個比值告訴我們，能否成功地把 all-gather 通訊隱藏在下一個線性層的計算背後。有趣的是，這個比值只取決於隱藏維度 $h$ 與張量平行度 $TP$，與序列長度或批次大小無關。
+
+## PP 的通訊分析（PP Communication Analysis）
+
+在管線平行（Pipeline Parallelism, PP）中，激活值與梯度會在管線階段（pipeline stage）之間傳遞。讓我們分析其通訊模式：
+
+- 前向傳播中的每個微批次：
+  - 接收並傳送激活值：$2 \cdot seq \cdot mbs \cdot h$ 位元組
+- 反向傳播中的每個微批次：
+  - 接收並傳送梯度：$2 \cdot seq \cdot mbs \cdot h$ 位元組
+- 每個微批次的總通訊量：$4 \cdot seq \cdot mbs \cdot h$ 位元組
+- 若考慮梯度累積步數（$gas$），總通訊量為：$4 \cdot gas \cdot seq \cdot mbs \cdot h$ 位元組
+
+讓我們分析能否把激活值／梯度的通訊與下一個 transformer 區塊的計算重疊。下一個管線階段中 transformer 區塊的計算時間為：
+
+$$
+t_{compute} = \frac{32 \cdot seq \cdot mbs \cdot h^2 \cdot num\_layers\_in\_next\_pp}{peak\_flops}
+$$
+
+而 P2P 傳輸的通訊時間為：
+
+$$
+t_{comm} = \frac{seq \cdot mbs \cdot h}{peak\_bw}
+$$
+
+要達到有效重疊，我們希望：
+
+$$
+\frac{t_{comm}}{t_{compute}} = \frac{peak\_flops}{32 \cdot h \cdot num\_layers\_in\_next\_pp \cdot peak\_bw} \leq 1
+$$
+
+與 TP 類似，這個比值與序列長度和批次大小無關。它取決於隱藏維度 $h$、下一個管線階段的層數，以及硬體的計算能力與 P2P 頻寬能力之間的比值。
+
+## 引用方式（Citation）
+
+如需在學術情境中引用本作品，請以下列格式標註：
+
+```
+Tazi et al., "The Ultra-Scale Playbook: Training LLMs on GPU Clusters", 2025.
+```
+
+BibTeX 引用格式：
+
+```bibtex
+@misc{ultrascale_playbook,
+      title={The Ultra-Scale Playbook: Training LLMs on GPU Clusters},
+      author={Nouamane Tazi, Ferdinand Mom, Haojun Zhao, Phuc Nguyen, Mohamed Mekkouri, Leandro Werra, Thomas Wolf},
+      year={2025},
+}
+```
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/appd.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

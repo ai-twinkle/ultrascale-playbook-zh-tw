@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 6 章　專家平行 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="ch05.html">← 第 5 章</a><span class="chapnav-current">第 6 章　專家平行</span><a href="ch07.html">第 7 章 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="ch05.html"><span class="dir">← 上一章</span><div class="ttl">第 5 章　管線平行</div></a><a class="next" href="ch07.html"><span class="dir">下一章 →</span><div class="ttl">第 7 章　5D 平行速覽</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 第 6 章　專家平行（Expert Parallelism）
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+這是我們要討論的最後一種平行方法。在深入探討之前，如果你從未接觸過混合專家（Mixture of Experts, MoE）模型，不妨先讀讀我們先前發表的[這篇篇幅短得多的部落格文章](https://huggingface.co/blog/moe)，它應該能幫助你更全面地理解 MoE 架構。
+
+混合專家模型近來隨著 GPT-4、Mixtral，以及更晚近的 DeepSeek-V3/R1 等模型而備受矚目。其基本想法是：每一層不再只有單一個前饋（feedforward）模組，而是可以有多個平行的模組，並將 token 路由（route）到其中某一個模組，以不同的方式處理。
+
+![ep_moe.png](../webapp/assets/images/ep_moe.png)
+
+*MoE 層的示意圖，取自 Switch Transformers 論文*
+
+MoE 層的設計讓我們很容易沿著專家這個維度實作平行化，也就是我們所稱的**專家平行（expert parallelism, EP）**。由於各個前饋層彼此完全獨立，我們可以直接把每個專家的前饋層放到不同的工作節點（worker）上。相較於張量平行（tensor parallelism, TP），這種做法輕量許多：我們不需要切分矩陣乘法，只需要把 token 的隱藏狀態路由給正確的專家即可。
+
+實務上，EP 通常會與其他形式的平行搭配使用——例如資料平行（data parallelism, DP）。這是因為 EP 只影響 MoE 層，並不會切分輸入的 token（不像上下文平行（context parallelism, CP）會沿著序列長度維度切分 token）。這表示如果我們只使用 EP，GPU 就會對所有非 MoE 的區塊做重複的計算。透過將 EP 與 DP 結合，我們就能有效率地把專家和輸入批次都切分到各個 GPU 上，如下方的簡化示意圖所示：
+
+![ep_schema.png](../webapp/assets/images/ep_schema.png)
+
+*資料來源：《A Survey on Mixture of Experts》*
+
+不過我們先別操之過急——接下來的一節會專門討論不同平行策略之間的各種交互作用，所以如果你還看不懂最後這張圖，也不用擔心。
+
+實務上，要讓 EP 高效運作有一些技巧，而且這些技巧與模型設計緊密相關。舉例來說，DeepSeek-V3 在路由器（router）中施加了一項限制，確保每個 token 至多只會被送往 $M$ 個節點（在他們的設定中是 4 個），以便把 token 留在單一節點上、減少通訊開銷。雖然專家平行已經存在一段時間了，但隨著 MoE 架構日益受到關注，它如今才重新獲得青睞。
+
+我們計劃不久之後在 picotron/nanotron 中加入更完整的 EP 範例，敬請期待！
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/ch06.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

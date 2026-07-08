@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 7 章　5D 平行速覽 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="ch06.html">← 第 6 章</a><span class="chapnav-current">第 7 章　5D 平行速覽</span><a href="ch08.html">第 8 章 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="ch06.html"><span class="dir">← 上一章</span><div class="ttl">第 6 章　專家平行</div></a><a class="next" href="ch08.html"><span class="dir">下一章 →</span><div class="ttl">第 8 章　尋找最佳訓練配置</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 第 7 章　5D 平行速覽（5D Parallelism in a Nutshell）
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+恭喜你，讀者！你現在已經看完了可用來擴展模型訓練的全部 5 種平行策略：
+
+1. 資料平行（Data Parallelism, DP）——沿著批次維度
+2. 張量平行（Tensor Parallelism, TP）——沿著隱藏維度
+3. 序列平行與上下文平行（Sequence and Context Parallelism, SP/CP）——沿著序列維度
+4. 管線平行（Pipeline Parallelism, PP）——沿著模型的層
+5. 專家平行（Expert Parallelism, EP）——沿著模型的專家
+
+以及可與資料平行結合、用來減少記憶體用量的 3 種 ZeRO 策略：
+
+1. ZeRO-1——在 DP 副本之間切分優化器狀態
+2. ZeRO-2——在 DP 副本之間切分優化器狀態與梯度
+3. ZeRO-3——在 DP 副本之間切分優化器狀態、梯度與參數
+
+到了這個階段，你大概會好奇：這些平行策略與 ZeRO 策略彼此之間如何比較、又如何互動？換句話說，哪些策略我們應該挑選並有效率地結合使用？哪些又應該分開看待？
+
+讓我們來看看它們的相似之處與交互作用。我們先把管線平行與 ZeRO-3 並排比較，因為兩者有非常相近的相似點，但也存在重要差異。
+
+**管線平行 vs. ZeRO-3——** PP 與 ZeRO-3 都是把模型權重切分到多個 GPU 上的方法，並沿著模型深度這條軸進行通訊與計算（例如在 ZeRO-3 中，我們會在計算的同時預取下一層）。這代表在這兩種方法中，每個裝置上執行的都是完整的層運算——相對地，像 TP 或 EP 這類方法則是在子層（sub-layer）單位上進行計算。
+
+下文中為求簡化，我們以「一層」來指稱一般而言應該稱為「一組層」的東西（作為模型切分的基本單位）。
+
+不過，PP 與 ZeRO-3 兩種方法之間仍有幾項主要差異：
+
+| | **ZeRO-3** | **管線平行（PP）** |
+|---|---|---|
+| 每個計算單元儲存的是 | 一層當中的一部分 | 完整的一層 |
+| 通訊用來傳輸的是 | 權重 | 激活值 |
+| 調度編排 | 與模型無關（model-agnostic） | 與模型無關（model-agnostic） |
+| 實作挑戰 | 模型切分與通訊的處理較為複雜 | 高效 PP 排程的處理較為複雜 |
+| 擴展考量 | 偏好較大的 $mbs$ 與 $seq\_len$ 以隱藏通訊 | 偏好較大的 $grad\_acc$ 以隱藏氣泡 |
+
+如你所見，ZeRO-3 與 PP 解決的是同一個難題，但採取了不同的做法；兩者之間的取捨，取決於你想把通訊的重心放在權重上還是激活值上。雖然它們可以結合使用，實務上並不常這麼做，因為這需要大幅提高全域批次大小（global batch size）來攤銷通訊成本，在全域批次大小、模型大小、網路頻寬與訓練效率之間形成取捨。如果你決定將兩者結合，ZeRO-3 應該設定為在一連串 PP 微批次（micro-batch）執行期間把權重保留在記憶體中，盡可能減少不必要的通訊開銷。
+
+另一方面，聚焦於優化器狀態與梯度的 ZeRO-1 和 ZeRO-2，則可以輕鬆地與管線平行結合，並與之互補。將它們結合並不會帶來任何特別的新挑戰。舉例來說，DeepSeek-V3 的訓練就採用了 PP 搭配 ZeRO-1。
+
+**張量平行**（搭配序列平行）天生就與管線平行和 ZeRO-3 互補，可與兩者結合，因為它仰賴的是矩陣乘法的分配律，讓權重與激活值可以先被切分、獨立計算，之後再合併。
+
+![TP 與 SP 示意圖](../webapp/assets/images/5d_nutshell_tp_sp.svg)
+
+我們不想只靠 TP 來做平行化的主要原因在於，實務上 TP 有兩項我們在前幾節討論過的限制。第一，由於它的通訊操作位於計算的關鍵路徑（critical path）上，一旦規模超過某個臨界點、通訊開銷開始佔據主導地位，就難以再良好地擴展。第二，不同於與模型無關的 ZeRO 和 PP，TP 需要謹慎處理激活值的切分——有時沿著隱藏維度（在 TP 區域），有時沿著序列維度（在 SP 區域）——這使得正確實作更加繁瑣，並且需要模型特定的知識，才能確保整個模型的切分模式都正確無誤。
+
+因此，在結合各種平行策略時，TP 通常會保留給節點內（intra-node）的高速通訊使用，而 ZeRO-3 或 PP 則可用於橫跨低速節點間（inter-node）通訊的平行群組，因為它們的通訊模式對頻寬的需求較低（PP），或者較容易與計算重疊（ZeRO-3）。結合這些技術時的主要考量，是為每個平行維度有效率地組織 GPU 群組，以最大化吞吐量、最小化通訊開銷，同時留意 TP 的擴展限制。舉例來說，負責 TP 通訊的 GPU 群組應該保持在節點內部。
+
+**上下文平行**與**專家平行**同樣能幫助我們切分激活值，可以視為 TP 的互補。前者處理長序列，後者則讓分散式的混合專家（Mixture of Experts, MoE）訓練成為可能，而且兩者可以結合使用，不會有什麼特別的問題。
+
+**上下文平行（CP）**專門針對超長序列訓練的挑戰，做法是沿著序列維度把激活值切分到各個 GPU 上。雖然大多數操作（如 MLP 和 LayerNorm）都能獨立處理這些切分後的序列，注意力層卻需要通訊，因為每個 token 都需要存取完整序列的 key/value。正如我們在 CP 一節所見，這可以透過讓計算與通訊互相重疊的 ring attention 模式來高效處理。當序列長度擴展到極端（128k+ token）時，即使採用完整的激活值重計算，注意力所需的記憶體在單一 GPU 上仍會高得難以負荷，此時 CP 就特別有價值。
+
+![CP 示意圖](../webapp/assets/images/5d_nutshell_cp.svg)
+
+**專家平行（EP）**專門針對訓練混合專家（MoE）模型的挑戰，做法是把專門化的「專家」切分到各個 GPU 上，並在計算過程中動態地把 token 路由到相關的專家。EP 的關鍵通訊操作是 `all-to-all`，負責把 token 路由給其被指派的專家，再把結果收集回來。雖然這項操作會引入一些通訊開銷，卻能大幅擴展模型容量，因為每個 token 在推論（以及訓練）時，都只會由總參數中小得多的一部分來處理。就分散式訓練與推論而言，當模型擴展到擁有大量專家時，把專家切分到多個 GPU 上就變得切實重要。
+
+例如，DeepSeek-V3 就使用了 256 個專家。
+
+![EP 示意圖](../webapp/assets/images/5d_nutshell_ep.svg)
+
+> 📝 **註**：EP 與 DP 在輸入處理方式上的這種相似性，正是為什麼有些實作會把專家平行視為資料平行的一個子群——關鍵差異在於，EP 使用專門化的專家路由，而不是讓所有 GPU 透過完全相同的模型副本來處理輸入。
+
+## 適用範圍與重點
+
+我們也快速總結一下，這些不同的平行策略分別在模型的哪些子部分影響最大：
+
+- 張量平行（與序列平行）透過同時切分權重與激活值，影響整個模型的計算。
+- 上下文平行主要影響注意力層，因為那是需要跨序列通訊的地方；其他層則各自獨立地處理切分後的序列。
+- 專家平行主要影響 MoE 層（它們取代了標準的 MLP 區塊），注意力與其他元件則維持不變。
+- 管線平行與 ZeRO 並不特別針對任何子模組或元件，唯一的例外是：管線平行中各模組與各層需要保持均衡，因此第一層與最後一層由於多了嵌入層（embedding layer），通常會受到特殊處理。
+
+| **張量 + 序列平行（TP + SP）** | **上下文平行（CP）** | **專家平行（EP）** |
+|---|---|---|
+| 沿隱藏／序列維度切分權重與激活值 | 沿序列維度切分激活值 | 切分專門化的專家權重與激活值 |
+| 為矩陣乘法操作（column/row linear）進行通訊 | 為注意力的 key/value 進行通訊 | 為將 token 路由至專家進行通訊 |
+| 需要模型特定的實作 | 除注意力外與模型無關 | 除 MoE 層外與模型無關 |
+| 偏好高頻寬的節點內通訊 | 偏好較長的序列長度 | 需要 MoE 架構 |
+
+## 全部總結
+
+那麼，把我們看過的所有技術收攏起來、結合在同一張圖裡如何？沒問題，我們接受這個挑戰！
+
+在這張總結圖中，你會看到單一 transformer 層（採用其 MoE 變體）的激活值與模組示意。我們同時也畫出了前面各節討論過的各種平行方向與通訊操作。
+
+![5D 平行全景圖](../webapp/assets/images/5d_full.svg)
+
+我們也可以把每一種策略節省記憶體的效果並排呈現，做一個**完整總覽**。我們會以不同的序列長度來繪製，並分別搭配選擇性重計算（上圖）與完整重計算（下圖），讓你看到這些策略與激活值之間的互動：
+
+![5D 平行下 8B 模型的記憶體用量](../webapp/assets/images/5Dparallelism_8Bmemoryusage.svg)
+
+最後，讓我們以高層次的視角來總結這些技術、它們背後的核心想法，以及各自的主要瓶頸：
+
+| **方法** | **記憶體節省主要作用於** | **平行／切分維度** | **缺點** |
+|---|---|---|---|
+| DP | 激活值（降低本地批次大小） | 批次 | 受限於最大批次大小 |
+| PP | 模型參數 | 模型的層 | 閒置氣泡與複雜的排程 |
+| TP/SP | 模型參數與激活值 | 隱藏維度／序列長度 | 需要高頻寬通訊 |
+| CP | 激活值 | 序列長度 | 在注意力模組中增加通訊開銷 |
+| EP | 專家參數 | 專家維度 | 需要 MoE 層，增加路由通訊開銷 |
+| ZeRO-1 | 優化器狀態 | 在 DP 副本間切分 | 參數通訊開銷 |
+| ZeRO-2 | 優化器狀態與梯度 | 在 DP 副本間切分 | 參數通訊開銷 |
+| ZeRO-3 | 優化器狀態、梯度與模型參數 | 在 DP 副本間切分 | 參數通訊開銷 |
+
+顯然，這些技術沒有任何一項是能神奇擴展的萬靈丹，我們往往必須以某種方式把它們結合起來。那麼，我們能不能歸納出幾條規則，幫助我們找到一個好的起點，據以在這些技術之間做選擇並加以組合？這將是下一節的主題。
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/ch07.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

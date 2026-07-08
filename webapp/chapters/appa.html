@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>附錄 A0　平行程式設計速成 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="ch11.html">← 結語</a><span class="chapnav-current">附錄 A0　平行程式設計速成</span><a href="appb.html">附錄 A1 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="ch11.html"><span class="dir">← 上一章</span><div class="ttl">結語　結語與展望</div></a><a class="next" href="appb.html"><span class="dir">下一章 →</span><div class="ttl">附錄 A1　分散式訓練效能分析</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 附錄 A0　平行程式設計速成（Parallel Programming Crash Course）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+在本書中，我們把 LLM 訓練從一張 GPU 擴展到數百張 GPU。這需要在所有機器之間進行權重、梯度與資料的通訊和同步。有一組分散式模式正是為此而生，稱為**集體通訊操作（collective operations）**。在本節中，我們將對這些操作——*Broadcast*、*All-Reduce*、*Scatter* 等——做一場小小的速成課。讓我們開始吧！
+
+一般的情境是：我們有若干個彼此獨立的節點，它們可以是 CPU 核心、GPU 或運算節點。每個節點各自執行一些運算，接著我們想把結果（或結果的一部分）傳遞給其他節點，供下一個運算步驟（$t+1$）使用。
+
+![集體通訊的一般情境](../webapp/assets/images/a0_general.png)
+
+*集體通訊的一般情境：多個獨立節點在運算步驟之間交換結果。*
+
+也許我們需要把某個節點的結果送給所有其他節點，或是需要把每個節點的中間結果加總起來，以回報整體結果。通常會有一個地位較特殊、扮演核心角色的節點，這裡以 `root`（根節點）表示，它是某些操作的目標或來源。讓我們從最簡單的基本操作之一開始：Broadcast（廣播）操作。
+
+## Broadcast
+
+一個非常常見的模式是：節點 1 上有一些資料，而你想把它分享給所有其他節點，讓它們能用這份資料進行運算。Broadcast 操作做的正是這件事：
+
+![Broadcast 操作示意圖](../webapp/assets/images/a0_broadcast.png)
+
+*Broadcast 操作：將根節點上的資料複製到所有其他節點。*
+
+集體通訊操作是 PyTorch 原生提供的，所以我們可以輕鬆寫一個小例子來示範廣播如何運作。我們首先需要用 `dist.init_process_group` 初始化一個行程群組（process group），它會設定好通訊後端（我們稍後會談到 NCCL），確定存在多少個 worker（也就是節點），並為每個 worker 指派一個 rank（可以用 `dist.get_rank` 取得）。最後，它會在各 worker 之間建立連線。
+
+為了展示 `dist.broadcast` 操作，我們在 `rank=0` 上建立一個含非零值的張量，在其他 worker 上則建立全為零的張量。接著用 `dist.broadcast(tensor, src=0)` 把 `rank=0` 的張量發送給所有其他 rank：
+
+```python
+import torch
+import torch.distributed as dist
+
+def init_process():
+    dist.init_process_group(backend='nccl')
+    torch.cuda.set_device(dist.get_rank())
+
+def example_broadcast():
+    if dist.get_rank() == 0:
+        tensor = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32).cuda()
+    else:
+        tensor = torch.zeros(5, dtype=torch.float32).cuda()
+    print(f"Before broadcast on rank {dist.get_rank()}: {tensor}")
+    dist.broadcast(tensor, src=0)
+    print(f"After broadcast on rank {dist.get_rank()}: {tensor}")
+
+init_process()
+example_broadcats()
+```
+
+你可以用 `torchrun --nproc_per_node=3 dist_op.py` 執行上面的腳本（你需要 3 張 GPU，或依情況調整 `nproc_per_node`），應該會看到如下輸出：
+
+```
+Before broadcast on rank 0: tensor([1., 2., 3., 4., 5.], device='cuda:0')
+Before broadcast on rank 1: tensor([0., 0., 0., 0., 0.], device='cuda:1')
+Before broadcast on rank 2: tensor([0., 0., 0., 0., 0.], device='cuda:2')
+
+After broadcast on rank 0: tensor([1., 2., 3., 4., 5.], device='cuda:0')
+After broadcast on rank 1: tensor([1., 2., 3., 4., 5.], device='cuda:1')
+After broadcast on rank 2: tensor([1., 2., 3., 4., 5.], device='cuda:2')
+```
+
+很好，看起來一切如預期運作。請注意，各 rank 的訊息可能會亂序印出，因為我們無法控制哪個 print 敘述先執行（這裡為了可讀性把它們排好了順序）。接下來讓我們看看 Reduce 與 All-Reduce 模式！
+
+## Reduce 與 All-Reduce
+
+Reduce（歸約）模式是分散式資料處理中最基本的模式之一。它的概念是：你想透過一個函式 `f()`（例如加總或平均）把每個節點上的資料合併起來。在 Reduce 範式中，結果只會送到根節點；而在 All-Reduce（全歸約）的情況下，結果會廣播給所有節點：
+
+![Reduce 與 All-Reduce 操作示意圖](../webapp/assets/images/a0_reduce_allreduce.png)
+
+*Reduce 操作將各節點資料合併後送至根節點；All-Reduce 則讓所有節點都得到合併結果。*
+
+當然，並沒有什麼神奇的「自由飛翔」節點能獨力完成這個運算；一般而言，每個節點會做一部分運算，節點之間則組織成環狀（ring）或樹狀（tree）結構。舉個簡單的例子：假設我們要把每個節點上的數字加總，而節點以環狀模式相連。第一個節點把自己的數字送給鄰居，鄰居把自己的數字加到收到的數字上，再轉發給下一個鄰居。沿著節點環繞行一圈之後，第一個節點就會收到總和。
+
+以下是執行簡單 Reduce 操作、將張量加總的程式碼，我們用 `op=dist.ReduceOp.SUM` 指定要使用的運算（關於支援的運算，更多資訊請見 [PyTorch 文件](https://pytorch.org/docs/stable/distributed.html#torch.distributed.ReduceOp)）：
+
+```python
+def example_reduce():
+    tensor = torch.tensor([dist.get_rank() + 1] * 5, dtype=torch.float32).cuda()
+    print(f"Before reduce on rank {dist.get_rank()}: {tensor}")
+    dist.reduce(tensor, dst=0, op=dist.ReduceOp.SUM)
+    print(f"After reduce on rank {rank}: {tensor}")
+
+init_process()
+example_reduce()
+```
+
+注意在 Reduce 操作中，只有 `dst` 節點上的張量會被更新：
+
+```
+Before reduce on rank 0: tensor([1., 1., 1., 1., 1.], device='cuda:0')
+Before reduce on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+Before reduce on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+
+After reduce on rank 0: tensor([6., 6., 6., 6., 6.], device='cuda:0')
+After reduce on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+After reduce on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+```
+
+同樣地，我們也可以執行 All-Reduce（這種情況下不需要指定目的節點）：
+
+```python
+def example_all_reduce():
+    tensor = torch.tensor([dist.get_rank() + 1] * 5, dtype=torch.float32).cuda()
+    print(f"Before all_reduce on rank {dist.get_rank()}: {tensor}")
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    print(f"After all_reduce on rank {dist.get_rank()}: {tensor}")
+
+init_process()
+example_all_reduce()
+```
+
+在這種情況下，所有節點上都能取得結果：
+
+```
+Before all_reduce on rank 0: tensor([1., 1., 1., 1., 1.], device='cuda:0')
+Before all_reduce on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+Before all_reduce on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+
+After all_reduce on rank 0: tensor([6., 6., 6., 6., 6.], device='cuda:0')
+After all_reduce on rank 1: tensor([6., 6., 6., 6., 6.], device='cuda:1')
+After all_reduce on rank 2: tensor([6., 6., 6., 6., 6.], device='cuda:2')
+```
+
+接下來我們看下一個分散式通訊操作。在許多實際情況中，每個節點會各自執行許多複雜的運算，而我們需要在節點之間分享最終結果。Gather 與 All-Gather 正是這種情況下要用的操作。讓我們來看看！
+
+## Gather 與 All-Gather
+
+Gather（收集）與 All-Gather（全收集）跟 Broadcast 很相似，都是在節點之間分發資料而不做任何修改。與 Broadcast 的主要差異在於：我們要分享的不是「一個節點上的單一份資料」，而是每個節點各自擁有一塊獨立的資料，我們想把所有資料收集到一個節點上（Gather 的情況），或收集到所有節點上（All-Gather 的情況）。一圖勝千言，來看看吧：
+
+![Gather 與 All-Gather 操作示意圖](../webapp/assets/images/a0_gather_allgather.png)
+
+*Gather 將各節點的資料塊收集到根節點；All-Gather 則讓每個節點都收集到所有資料塊。*
+
+注意虛線表示有些資料其實完全不需要移動（因為它本來就在該節點上）。
+
+在 Gather 操作中，我們需要準備一個容器物件來存放收集到的張量——在這個例子中是 `gather_list`：
+
+```python
+def example_gather():
+    tensor = torch.tensor([dist.get_rank() + 1] * 5, dtype=torch.float32).cuda()
+    if dist.get_rank() == 0:
+        gather_list = [
+            torch.zeros(5, dtype=torch.float32).cuda()
+            for _ in range(dist.get_world_size())
+            ]
+    else:
+        gather_list = None
+    print(f"Before gather on rank {dist.get_rank()}: {tensor}")
+    dist.gather(tensor, gather_list, dst=0)
+    if dist.get_rank() == 0:
+        print(f"After gather on rank 0: {gather_list}")
+
+init_process()
+example_gather()
+```
+
+我們可以看到，`gather_list` 確實包含了所有 rank 的張量：
+
+```
+Before gather on rank 0: tensor([1., 1., 1., 1., 1.], device='cuda:0')
+Before gather on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+Before gather on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+
+After gather on rank 0: [tensor([1., 1., 1., 1., 1.], device='cuda:0'),
+                         tensor([2., 2., 2., 2., 2.], device='cuda:0'),
+                         tensor([3., 3., 3., 3., 3.], device='cuda:0')]
+```
+
+對於 All-Gather 的範例，我們唯一需要改變的是：每個節點都需要一個存放結果的佔位容器：
+
+```python
+def example_all_gather():
+    tensor = torch.tensor([dist.get_rank() + 1] * 5, dtype=torch.float32).cuda()
+    gather_list = [
+        torch.zeros(5, dtype=torch.float32).cuda()
+        for _ in range(dist.get_world_size())
+        ]
+    print(f"Before all_gather on rank {dist.get_rank()}: {tensor}")
+    dist.all_gather(gather_list, tensor)
+    print(f"After all_gather on rank {dist.get_rank()}: {gather_list}")
+
+init_process()
+example_all_gather()
+```
+
+確實，我們可以看到現在每個節點都擁有全部的資料：
+
+```
+Before all_gather on rank 0: tensor([1., 1., 1., 1., 1.], device='cuda:0')
+Before all_gather on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+Before all_gather on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+
+After all_gather on rank 0: [tensor([1., 1., 1., 1., 1.], device='cuda:0'),
+                             tensor([2., 2., 2., 2., 2.], device='cuda:0'),
+                             tensor([3., 3., 3., 3., 3.], device='cuda:0')]
+After all_gather on rank 1: [tensor([1., 1., 1., 1., 1.], device='cuda:1'),
+                             tensor([2., 2., 2., 2., 2.], device='cuda:0'),
+                             tensor([3., 3., 3., 3., 3.], device='cuda:0')]
+After all_gather on rank 2: [tensor([1., 1., 1., 1., 1.], device='cuda:2'),
+                             tensor([2., 2., 2., 2., 2.], device='cuda:2'),
+                             tensor([3., 3., 3., 3., 3.], device='cuda:2')]
+```
+
+那 Gather 的反向操作呢？在這種情況下，我們把所有資料放在一個節點上，想把它切分後分發到各個節點，過程中可能還帶點中間處理。這時可以使用 Scatter，或者在需要對資料先做運算的情況下，使用 Reduce-Scatter 模式：
+
+## Scatter 與 Reduce-Scatter
+
+顧名思義，Scatter（分散）操作的目的是把一個節點上的資料切成分片，並把分片分發給所有其他節點。因此它與 Broadcast 操作不同——Broadcast 是不切分地複製整份資料——而它正是 Gather 操作在邏輯上的反向操作。
+
+Reduce-Scatter（歸約分散）模式稍微複雜一點：想像你像 Reduce 那樣對資料套用一個運算，但結果不是只送到一個節點，而是平均分發給所有節點：
+
+![Scatter 與 Reduce-Scatter 操作示意圖](../webapp/assets/images/a0_scatter_reducescatter.png)
+
+*Scatter 將根節點的資料切片後分發給各節點；Reduce-Scatter 先對各節點資料做歸約運算，再把結果切片分發。*
+
+Scatter 操作在程式碼中的寫法正好與 Gather 相反：我們準備的不是存放結果的張量清單，而是要分發出去的來源資料張量清單。我們還需要指定 `src`：
+
+```python
+def example_scatter():
+    if dist.get_rank() == 0:
+        scatter_list = [
+            torch.tensor([i + 1] * 5, dtype=torch.float32).cuda()
+            for i in range(dist.get_world_size())
+            ]
+        print(f"Rank 0: Tensor to scatter: {scatter_list}")
+    else:
+        scatter_list = None
+    tensor = torch.zeros(5, dtype=torch.float32).cuda()
+    print(f"Before scatter on rank {dist.get_rank()}: {tensor}")
+    dist.scatter(tensor, scatter_list, src=0)
+    print(f"After scatter on rank {dist.get_rank()}: {tensor}")
+
+init_process()
+example_scatter()
+```
+
+從結果可以看到，空白的張量被填入了 `scatter_list` 的內容：
+
+```
+Rank 0: Tensor to scatter: [tensor([1., 1., 1., 1., 1.], device='cuda:0'),
+                            tensor([2., 2., 2., 2., 2.], device='cuda:0'),
+                            tensor([3., 3., 3., 3., 3.], device='cuda:0')]
+Before scatter on rank 0: tensor([0., 0., 0., 0., 0.], device='cuda:0')
+Before scatter on rank 1: tensor([0., 0., 0., 0., 0.], device='cuda:1')
+Before scatter on rank 2: tensor([0., 0., 0., 0., 0.], device='cuda:2')
+
+After scatter on rank 0: tensor([1., 1., 1., 1., 1.], device='cuda:0')
+After scatter on rank 1: tensor([2., 2., 2., 2., 2.], device='cuda:1')
+After scatter on rank 2: tensor([3., 3., 3., 3., 3.], device='cuda:2')
+```
+
+讓我們建立一些更有趣的資料來示範 Reduce-Scatter 的邏輯：在每個節點上，我們各建立一個由 2 元素向量組成的清單，其中的冪次與偏移量都是節點 rank 的函式（有點難憑空想像，直接看下面的範例吧）：
+
+```python
+def example_reduce_scatter():
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    input_tensor = [
+        torch.tensor([(rank + 1) * i for i in range(1, 3)], dtype=torch.float32).cuda()**(j+1) 
+        for j in range(world_size)
+        ]
+    output_tensor = torch.zeros(2, dtype=torch.float32).cuda()
+    print(f"Before ReduceScatter on rank {rank}: {input_tensor}")
+    dist.reduce_scatter(output_tensor, input_tensor, op=dist.ReduceOp.SUM)
+    print(f"After ReduceScatter on rank {rank}: {output_tensor}")    
+
+init_process()
+example_reduce_scatter()
+```
+
+讓我們印出剛才建立的資料型態。同時也能立刻看出 Reduce-Scatter 的模式：第一個 rank 收到的是各節點第一個張量的總和，第二個 rank 收到的是各節點第二個張量的總和，依此類推：
+
+```
+Before ReduceScatter on rank 0: [tensor([1., 2.], device='cuda:0'),
+                                 tensor([1., 4.], device='cuda:0'),
+                                 tensor([1., 8.], device='cuda:0')]
+Before ReduceScatter on rank 1: [tensor([2., 4.], device='cuda:1'),
+                                 tensor([ 4., 16.], device='cuda:1'),
+                                 tensor([ 8., 64.], device='cuda:1')]
+Before ReduceScatter on rank 2: [tensor([3., 6.], device='cuda:2'),
+                                 tensor([ 9., 36.], device='cuda:2'),
+                                 tensor([ 27., 216.], device='cuda:2')]
+
+After ReduceScatter on rank 0: tensor([ 6., 12.], device='cuda:0')
+After ReduceScatter on rank 1: tensor([14., 56.], device='cuda:1')
+After ReduceScatter on rank 2: tensor([ 36., 288.], device='cuda:2')
+```
+
+接下來，讓我們快速看看一個利用 Reduce-Scatter 與 All-Gather 來實作 All-Reduce 的常見做法：Ring All-Reduce。
+
+## 快速聚焦：Ring All-Reduce
+
+**Ring All-Reduce（環狀全歸約）**是 All-Reduce 的一種特定實作，針對可擴展性做了最佳化。相較於讓所有裝置彼此直接通訊（那可能造成通訊瓶頸），Ring All-Reduce 可以拆解為兩個關鍵步驟：Reduce-Scatter 與 All-Gather。它的運作方式如下：
+
+1. **Reduce-Scatter**
+   * 每個裝置把自己的資料（例如梯度）切成多個資料塊（chunk），並把其中一塊送給鄰居。同時，每個裝置也會從另一側的鄰居收到一塊資料。
+   * 每當裝置收到一塊資料，就把自己對應的那塊加（歸約）到收到的資料塊上。
+   * 這個過程沿著環持續進行，直到每個裝置都持有一塊歸約完成的資料塊，代表該資料塊在所有裝置上的梯度總和。
+2. **All-Gather**
+   * 現在，每個裝置需要向其他裝置收集那些已完成歸約的資料塊。
+   * 各裝置開始把自己歸約好的資料塊送給鄰居。
+   * 每個裝置持續轉發收到的資料塊，直到每個裝置都擁有全部歸約完成的資料塊，讓每個裝置都得到完整、加總後的梯度。
+
+讓我們用以下的 GIF 動畫來說明：這裡有 5 張 GPU，每張各有一個長度為 5 的張量。第一段動畫展示 Reduce-Scatter 步驟——結束時，每張 GPU 都會收到某一特定資料塊（橘色矩形）的歸約結果。
+
+![Ring All-Reduce 的 Reduce-Scatter 步驟動畫](../webapp/assets/images/a0_reduce_scatter.gif)
+
+*Reduce-Scatter 步驟：資料塊沿著環傳遞並累加，最終每張 GPU 持有一塊完成歸約的結果（橘色矩形）。*
+
+下一段動畫展示 All-Gather 步驟——結束時，每張 GPU 都會取得 All-Reduce 操作的完整結果：
+
+![Ring All-Reduce 的 All-Gather 步驟動畫](../webapp/assets/images/a0_all_gather.gif)
+
+*All-Gather 步驟：歸約完成的資料塊沿著環轉發，最終每張 GPU 都取得完整結果。*
+
+你可能已經注意到，在 reduce-scatter 與 all-gather 兩個步驟中，$N$ 張 GPU 中的每一張都會各傳送與接收數值 $N-1$ 次。每張 GPU 每次傳輸會送出 $\frac{K}{N}$ 個數值，其中 $K$ 是這個要在所有 GPU 之間加總的陣列中數值的總數。因此，每張 GPU 傳入與傳出的資料總量為 $2 \times (N-1) \times \frac{K}{N}$。當 $N$（GPU 數量）很大時，每張 GPU 傳入與傳出的資料總量約為 $2 \times K$，其中 $K$ 是參數總數。
+
+**關於 All-Reduce，有兩個重點要記住：**
+
+1. 當 $N$（GPU 數量）很大時，All-Reduce 的通訊成本約為 $2 \times K$。
+2. 一個 All-Reduce 操作可以拆解為一次 reduce-scatter 接著一次 all-gather。這兩個操作各自的通訊成本是 All-Reduce 的一半，約為 $K$。
+
+由此可見，即使節點之間的頻寬有限，這種實作方式也能有效加以利用。
+
+我們已經看過分散式操作的主要建構元件，但在實際見到它們上場之前，先來看看一個專門用於同步的特殊操作：Barrier。
+
+## Barrier
+
+Barrier（同步屏障）是一個用來同步所有節點的簡單操作。屏障要等到所有節點都抵達後才會解除，之後節點們才能繼續進行後續運算：
+
+![Barrier 操作示意圖](../webapp/assets/images/a0_barrier.png)
+
+*Barrier 操作：所有節點都抵達屏障後才能一起繼續執行。*
+
+我們可以在每個節點上設定不同的睡眠時間來模擬節點延遲，看看所有節點通過屏障總共花了多久：
+
+```python
+def example_barrier():
+    rank = dist.get_rank()
+    t_start = time.time()
+    print(f"Rank {rank} sleeps {rank} seconds.")
+    time.sleep(rank)  # 模擬不同的處理時間
+    dist.barrier()
+    print(f"Rank {rank} after barrier time delta: {time.time()-t_start:.4f}")
+
+init_process()
+example_barrier()
+```
+
+可以看到，儘管第一個 rank 完全沒有睡眠，它同樣花了 2 秒才通過屏障：
+
+```
+Rank 0 sleeps 0 seconds.
+Rank 1 sleeps 1 seconds.
+Rank 2 sleeps 2 seconds.
+
+Rank 0 after barrier time delta: 2.0025
+Rank 1 after barrier time delta: 2.0025
+Rank 2 after barrier time delta: 2.0024
+```
+
+像這樣同步所有節點時必須謹慎，因為這違背了平行獨立運算的初衷，可能因此拖慢整體處理速度。在許多情況下，讓跑得快的節點先開始處理下一項工作其實無妨，因為這個快節點在下一輪迭代中可能變慢，延遲便會在整個過程中被拉平。
+
+在進入實際的分散式訓練實作之前，讓我們先解開一個謎團：NCCL 到底是什麼鬼？
+
+## NCCL：NVIDIA Collective Communications Library
+
+在許多 GPU 上訓練大型模型時，我們或許偶爾能挖到金礦（gold），但一定會碰上鎳礦（nickel，或說 NCCL 🥁）！那是什麼？
+
+有好幾個實作集體通訊、且 PyTorch 支援的函式庫：有經典的 **MPI**（Message Passing Interface，訊息傳遞介面），有 Meta 開發的 **Gloo**，最後還有 `NCCL`（NVIDIA Collective Communications Library，NVIDIA 集體通訊函式庫）。就集體通訊模式而言，它們提供的功能相似，但各自針對不同的硬體配置做了最佳化：NCCL 的設計目標是高效服務 GPU 對 GPU 的通訊，而 MPI 與 Gloo 則是為 CPU 對 CPU 或 CPU 對 GPU 的通訊而設。PyTorch 提供了一份[很棒的指南](https://pytorch.org/docs/stable/distributed.html#which-backend-to-use)幫你決定該用哪一個：
+
+* GPU 訓練：使用 NCCL
+* CPU 訓練：使用 Gloo
+
+決策樹中還有一些更細微的要點，就留給讀者到上面引用的 PyTorch 指南中自行探索了。
+
+現在我們已經涵蓋了分散式訓練的基礎操作，你應該可以輕鬆地跟上本書的內容了。
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/appa.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>

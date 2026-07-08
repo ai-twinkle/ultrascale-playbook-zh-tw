@@ -1,0 +1,7 @@
+# 原文 PDF 不隨庫散布——請至原 HF Space 取得
+ultrascale_playbook.pdf
+
+.DS_Store
+__pycache__/
+*.pyc
+.claude/

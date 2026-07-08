@@ -1,0 +1,151 @@
+# 附錄 A1　分散式訓練效能分析（Distributed Training Profiling）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+## Kernel
+
+我們先假設 kernel（GPU 運算核心程式）已經整合進 PyTorch。舉個簡單的例子，可以看看 PyTorch 中以 `torch.nn.functional.layer_norm` 實作的層正規化（layer normalization）函式。要對這個函式底層的 kernel 進行效能分析，有好幾種方法。最直接的做法或許是使用 Python 的 `time` 模組。然而，由於 CUDA 操作是非同步的，用這種方式量測時間只會捕捉到在 Python 端啟動 kernel 的額外開銷，而非 kernel 本身實際的執行時間。
+
+為了解決這個問題，我們可以利用 `torch.cuda.Event` 來精確計時，並搭配 `torch.cuda.synchronize()` 指令，確保程式會等到 kernel 執行完畢。以下程式片段示範了這個做法：
+
+```python
+def profile_pytorch(func, input):
+    # 建立 CUDA event 來追蹤時間。CUDA 操作是非同步的。
+    start = torch.cuda.Event(enable_timing=True)  # 標記開始時間的 event
+    end = torch.cuda.Event(enable_timing=True)    # 標記結束時間的 event
+    # 先暖身（warm up），消除第一次執行帶來的額外開銷，
+    # 因為那可能無法反映實際效能
+    for _ in range(10):
+        func(input)
+    # 在執行目標函式之前記錄開始時間
+    start.record()
+    func(input)  # 呼叫我們要分析的函式
+    # 在函式執行完成後記錄結束時間
+    end.record()
+    # 同步 CUDA 操作，確保所有操作都已完成，
+    # 再量測經過的時間
+    torch.cuda.synchronize()
+    # 計算並回傳經過的時間（毫秒）
+    return start.elapsed_time(end)
+```
+
+更有效率的分析方式，是使用前文介紹過的 PyTorch profiler。例如，看看以下這段程式碼：
+
+```python
+import torch
+import torch.nn.functional as F
+
+def pytorch_layer_norm(input):
+    return F.layer_norm(input, input.size()[1:])
+
+a = torch.randn(10000, 10000).cuda()
+
+with torch.profiler.profile(
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,   # 分析 CPU 活動
+        torch.profiler.ProfilerActivity.CUDA,  # 分析 CUDA 活動
+    ],
+    # 定義 profiler 的排程
+    schedule=torch.profiler.schedule(
+        wait=1,      # 先等待 1 個迭代再開始分析
+        warmup=3,    # 暖身 3 個迭代以穩定效能
+        active=2,    # 實際分析 2 個迭代
+        repeat=1,    # 重複此分析排程 1 次
+    ),
+    on_trace_ready=torch.profiler.tensorboard_trace_handler('.'),
+
+) as p:
+    for iter in range(10):
+        pytorch_layer_norm(a)
+        p.step()
+
+# 印出分析結果表格，依 CUDA 總時間排序，只列出前幾筆
+print(p.key_averages().table(sort_by="cuda_time_total", row_limit=8))
+```
+
+這會印出依 CUDA 總時間排序的彙總分析結果，輸出如下：
+
+![依 CUDA 總時間排序的 PyTorch profiler 彙總結果](../webapp/assets/images/a1_kernels.png)
+
+你也可以如前文所述，在 `chrome://tracing/` 檢視 trace（執行軌跡紀錄）。
+
+> 💡 **提示**：如果你是第一次使用這個工具，可以用左右方向鍵在 trace 中移動；此外，按住 **Alt** 鍵並用滑鼠左右捲動，即可縮放畫面。
+
+放大之後，你可以在這份 trace 中觀察呼叫 `layer_norm` 時的操作流程：
+
+![layer_norm 呼叫在 trace 中的操作流程](../webapp/assets/images/a1_profile_trace.png)
+
+整個序列從 CPU 端（上半部）開始，先是 `aten::layer_norm`，接著進入 `aten::native_layer_norm`，然後轉移到 `cudaLaunchKernel`。再往下就進到 GPU 端，呼叫 `vectorized_layer_norm_kernel` 這個 kernel。
+
+> 📝 **註**：在 profiler 中把 `profile_memory` 設為 `True` 即可啟用記憶體分析。不過，這可能會讓 trace 變得更複雜。
+
+PyTorch profiler 能快速提供效能概覽，而 **NVIDIA Nsight Compute（`ncu`）** 則能更深入洞察 GPU 效能，包括每個 kernel 的詳細執行時間與記憶體使用量。執行這個 profiler 非常簡單：
+
+```bash
+ncu --set full python layer_norm.py
+```
+
+其中 `layer_norm.py` 是一個單純執行層正規化函式的檔案。這個指令會產生日誌輸出，但若要更有效地視覺化結果，可以加上輸出旗標：
+
+```bash
+ncu --set full -o output python layer_norm.py
+```
+
+接著用 Nsight Compute 開啟 `output.ncu-rep` 檔案，你會看到如下的畫面，其中有關於計算與記憶體使用率的明確警告，以及如何讓 kernel 在計算與記憶體之間取得更好的平衡、達到最大佔用率（occupancy）的建議：
+
+![Nsight Compute 的分析檢視畫面](../webapp/assets/images/a1_ncu.png)
+
+## C++ 擴充（CPP extension）
+
+如果你想分析的 kernel 尚未整合進 PyTorch，可以使用 PyTorch 的 `cpp_extension` 模組，輕鬆編譯並執行自訂的 CUDA 程式碼。流程很簡單——只要把你的 CUDA kernel 寫在 `.cu` 檔案裡，再用 `cpp_extension` 模組的 `load` 函式在 Python 中載入即可。
+
+以一個簡單的 `add` kernel 為例，`.cu` 檔案會長這樣：
+
+```cpp
+#include <torch/extension.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+__global__ void add_kernel(float* x, float* y, float* output, int size) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < size) {
+        output[index] = x[index] + y[index];
+    }
+}
+
+void add_cuda(torch::Tensor x, torch::Tensor y, torch::Tensor output) {
+    int threads = 1024;
+    int blocks = (x.size(0) + threads - 1) / threads;
+
+    add_kernel<<<blocks, threads>>>(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), x.size(0));
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("add_cuda", &add_cuda, "Vector addition (CUDA)");
+}
+```
+
+以及用來載入這個 kernel 的 Python 檔案：
+
+```python
+import torch
+from torch.utils.cpp_extension import load
+
+# 載入並編譯 CUDA 擴充模組
+vector_add = load(
+    name="vector_add",
+    sources=["add_kernel.cu"],
+    verbose=True
+)
+
+# 定義輸入張量
+size = 10000
+x = torch.randn(size, device='cuda')
+y = torch.randn(size, device='cuda')
+output = torch.empty(size, device='cuda')
+
+# 執行 CUDA kernel
+vector_add.add_cuda(x, y, output)
+```
+
+透過這種方法，你就可以像先前示範的那樣，使用 PyTorch 的 profiler 或 NVIDIA 的工具來分析這個自訂 CUDA kernel。

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>結語　結語與展望 — Ultra-Scale Playbook 中文版</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
+  <nav class="chapnav"><a href="ch10.html">← 第 10 章</a><span class="chapnav-current">結語　結語與展望</span><a href="appa.html">附錄 A0 →</a></nav>
+</header>
+<div class="layout">
+  <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
+  <main class="main">
+    <div id="lab-banner"></div>
+    <article id="content" class="prose"></article>
+    <section id="lab" class="lab" hidden>
+      <h2 class="lab-title">🧪 互動實驗室</h2>
+      <div id="lab-intro"></div>
+      <div id="lab-root"></div>
+    </section>
+    <nav class="pager"><a class="prev" href="ch10.html"><span class="dir">← 上一章</span><div class="ttl">第 10 章　融合核心、Flash Attention 與混合精度</div></a><a class="next" href="appa.html"><span class="dir">下一章 →</span><div class="ttl">附錄 A0　平行程式設計速成</div></a></nav>
+    <footer class="pagefoot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong> · 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook</a>》· 原作依 Apache 2.0 釋出，譯文同授權，僅供學習研究使用。</footer>
+  </main>
+</div>
+<script type="text/markdown" id="chapter-md">
+# 結語與展望（Conclusion）
+
+> 譯自 Hugging Face nanotron 團隊《The Ultra-Scale Playbook: Training LLMs on GPU Clusters》（Apache 2.0），原文為 [Hugging Face Space](https://huggingface.co/spaces/nanotron/ultrascale-playbook)。
+
+恭喜你，親愛的讀者，你堅持到了最後！我們一起走完了一段相當漫長的旅程：從理解如何在單一 GPU 上訓練一個簡單的模型出發，一路走到精通那些用來在數千張 GPU 上高效訓練 Llama-405B 與 DeepSeek-V3 這類大型語言模型的各種精妙技術。到了現在，你應該已經能（相對）輕鬆地讀懂像 Llama-3 的 4D 平行化配置這樣的架構圖了：
+
+![Llama-3 的 4D 平行化配置](../webapp/assets/images/conclusion_llama3_parallelism.png)
+*Llama-3 的 4D 平行化（4D parallelism）配置示意圖。*
+
+要協調大規模的 GPU 叢集來高效訓練 LLM 絕非易事。我們學到了如何最佳化 GPU 之間的計算與通訊，讓它們隨時都以最高的使用率運轉。這牽涉到針對特定的模型與叢集規模選擇合適的平行化策略、盡可能讓通訊與計算重疊，以及撰寫將硬體布局納入考量的自訂 kernel，讓某項運算能在 GPU 上以最快的速度執行。
+
+你或許仍然覺得這些知識有點小眾，只跟少數從事 LLM 預訓練的人有關。就歷史經驗來看，過去也許確實如此；但隨著 [AI 開發者社群](https://huggingface.co)與模型規模都在快速成長，將分散式技術用於推論、微調與訓練的社群也正呈指數級擴大，使得分散式訓練環境變得越來越普遍。因此，深入鑽研分散式的各種主題，此刻可說是恰逢其時。
+
+這是一段漫長的學習旅程——而且不只對你而言是如此！在 GPU 叢集上執行數千次基準測試，比我們原先預期的更具挑戰性，因此我們也想和你分享我們自身學習歷程中的一些心得亮點。
+
+## 那麼，接下來呢？（So, what's next?）
+
+你現在已經對分散式訓練的主要概念有了良好的整體認識，但同時，對於其中不少工具與技術，我們也只是淺嘗即止。想要深入鑽研一個主題有很多途徑，以下是我們推薦的幾個步驟：
+
+* 仔細研讀一些具有里程碑意義或非常新的論文。你可以在「參考文獻」（References）中找到一份非常詳盡的清單，收錄了最具影響力的論文、部落格文章與書籍。
+* 從零開始，親手實作一個演算法。很多時候，唯有自己動手實作過，一個方法才會真正「豁然開朗」。
+* 投入其中一個被廣泛使用的框架並開始貢獻：修 bug、回覆 issue，或是實作新功能。這是進入任何機器學習領域最好的方式！
+
+我們希望這本書能幫助你踏入分散式訓練的世界，並期待你在 GPU 叢集的嗡鳴聲中，訓練出下一世代的出色模型！
+
+---
+
+**最後想對我們的首批讀者說幾句話**。我們對這部作品相當滿意，因此決定發行限量的實體印刷版，作為送給首批讀者的禮物。
+
+如果你是最早在下方填寫電子郵件地址的前 50 位讀者之一，我們會在今年稍晚與你聯絡，待我們將內容排版為印刷版本後，寄送一本真正的實體書給你。
+
+我們預計這本書大約會有 100 至 150 頁，內容與部落格文章相同；不過我們也可能視印刷成書的實際需求，決定加以縮減或擴充。
+
+想索取實體書的話，請在這份 [Google 表單](https://forms.gle/e1GkAShUCtgcwnne8)中填寫你的電子郵件地址。
+
+無論你是我們的首批讀者，還是在很久之後才讀到這篇文章，我們都很高興看到你喜歡這次的知識分享。願開源與開放科學的原力，永遠與你同在。
+
+## 致謝（Acknowledgements）
+
+我們感謝 [Elie](https://huggingface.co/eliebak) 進行了縝密的審閱，並使用 NotebookLM 製作了音訊內容。特別感謝 [Hynek](https://huggingface.co/hynky) 最佳化了前端效能。也感謝 [Simon](https://huggingface.co/sbrandeis) 解決了 Hub 上的一些問題。
+
+## 討論區（Discussion page）
+
+原文在 Hugging Face Space 上設有開放的討論區。如果你想討論這篇文章的內容、提出問題、建議修改，或只是想打聲招呼，歡迎到[討論區](https://huggingface.co/spaces/nanotron/ultrascale-playbook/discussions)開啟一個討論串。
+
+</script>
+<script src="../assets/marked.min.js"></script>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/auto-render.min.js"></script>
+<script src="../assets/widgets/ch11.js"></script>
+<script src="../assets/app.js"></script>
+</body>
+</html>
