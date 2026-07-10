@@ -169,3 +169,5 @@ a.card:hover { transform: translateY(-3px); border-color: var(--accent); text-de
 .gh-star .star-ico { color: var(--accent-2); }
 .gh-star .gh-count { font-weight: 700; background: var(--panel-2); border-radius: 99px; padding: 0 .5rem; min-width: 1.4em; text-align: center; }
 @media (max-width: 640px) { .topbar .gh-star { padding: .3rem .55rem; } .topbar .gh-star .gh-label { display: none; } }
+.hero .meta a { color: var(--fg-muted); }
+.hero .meta a:hover { color: var(--accent); text-decoration: none; }
