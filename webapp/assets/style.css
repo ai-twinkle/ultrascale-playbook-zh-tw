@@ -162,3 +162,10 @@ a.card:hover { transform: translateY(-3px); border-color: var(--accent); text-de
 .card .badge { position: absolute; top: .9rem; right: .9rem; font-size: .68rem; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: .15rem .6rem; font-weight: 600; }
 .card.disabled { opacity: .55; }
 .foot { max-width: 1120px; margin: 0 auto; padding: 0 1.2rem 3rem; color: var(--fg-muted); font-size: .78rem; }
+
+/* ===== GitHub Star 按鈕 ===== */
+.gh-star { display: inline-flex; align-items: center; gap: .45rem; padding: .3rem .8rem; border: 1px solid var(--border); border-radius: 99px; background: var(--panel); color: var(--fg); font-size: .8rem; font-weight: 600; white-space: nowrap; }
+.gh-star:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.gh-star .star-ico { color: var(--accent-2); }
+.gh-star .gh-count { font-weight: 700; background: var(--panel-2); border-radius: 99px; padding: 0 .5rem; min-width: 1.4em; text-align: center; }
+@media (max-width: 640px) { .topbar .gh-star { padding: .3rem .55rem; } .topbar .gh-star .gh-label { display: none; } }

@@ -60,7 +60,7 @@ PAGE_TMPL = """<!DOCTYPE html>
 <body>
 <header class="topbar">
   <a class="brand" href="../index.html">Ultra-Scale Playbook 中文版<span>在 GPU 叢集上訓練 LLM</span></a>
-  <nav class="chapnav">{prev_top}<span class="chapnav-current">{no}</span>{next_top}</nav>
+  <nav class="chapnav">{prev_top}<span class="chapnav-current">{no}</span>{next_top}<a class="gh-star" href="https://github.com/ai-twinkle/ultrascale-playbook-zh-tw" target="_blank" rel="noopener" data-gh-repo="ai-twinkle/ultrascale-playbook-zh-tw"><span class="star-ico">★</span><span class="gh-label">Star</span><b class="gh-count" hidden></b></a></nav>
 </header>
 <div class="layout">
   <aside class="sidebar"><nav id="toc" class="toc"><h2>本章目錄</h2></nav></aside>
@@ -83,6 +83,7 @@ PAGE_TMPL = """<!DOCTYPE html>
 <script src="../assets/katex/katex.min.js"></script>
 <script src="../assets/katex/auto-render.min.js"></script>
 {widget_tag}<script src="../assets/app.js"></script>
+<script src="../assets/gh-star.js"></script>
 </body>
 </html>
 """
@@ -101,6 +102,7 @@ INDEX_TMPL = """<!DOCTYPE html>
   <h1>超大規模訓練實戰手冊<br>The Ultra-Scale Playbook</h1>
   <p class="sub">Hugging Face nanotron 團隊著（Nouamane Tazi、Ferdinand Mom、Haojun Zhao、Phuc Nguyen、Mohamed Mekkouri、Leandro von Werra、Thomas Wolf）。從單 GPU 的記憶體剖析出發，一路走到資料／張量／上下文／管線／專家五維平行、GPU kernel 最佳化與混合精度——在 GPU 叢集上訓練大型語言模型所需的一切。每章附互動實驗。</p>
   <p class="sub" style="font-size:.82rem">由台灣 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a> 翻譯維護的非官方社群翻譯版本。</p>
+  <p><a class="gh-star" href="https://github.com/ai-twinkle/ultrascale-playbook-zh-tw" target="_blank" rel="noopener" data-gh-repo="ai-twinkle/ultrascale-playbook-zh-tw"><span class="star-ico">★</span><span class="gh-label">GitHub 給我們一顆星</span><b class="gh-count" hidden></b></a></p>
   <div class="meta">
     <div><b>{n_ch}</b>章節</div>
     <div><b>{n_app}</b>附錄</div>
@@ -118,7 +120,8 @@ INDEX_TMPL = """<!DOCTYPE html>
 {appendix_cards}
   </div>
 </div>
-<footer class="foot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong>（unofficial community translation）· 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook: Training LLMs on GPU Clusters</a>》· 原作依 Apache 2.0 釋出，譯文同授權 · 僅供學習研究使用。</footer>
+<footer class="foot">本站為 <a href="https://github.com/ai-twinkle">Twinkle AI Community</a>（台灣）的<strong>非官方社群翻譯</strong>（unofficial community translation）· 譯自 Hugging Face nanotron 團隊《<a href="https://huggingface.co/spaces/nanotron/ultrascale-playbook">The Ultra-Scale Playbook: Training LLMs on GPU Clusters</a>》· 原作依 Apache 2.0 釋出，譯文同授權 · 僅供學習研究使用 · <a href="https://github.com/ai-twinkle/ultrascale-playbook-zh-tw">GitHub 原始碼</a></footer>
+<script src="assets/gh-star.js"></script>
 </body>
 </html>
 """
